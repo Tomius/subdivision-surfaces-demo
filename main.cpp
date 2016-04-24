@@ -389,6 +389,13 @@ public:
     if (!edges_.empty()) {
       std::cout << "Update cache called with cache up to date" << std::endl;
       return;
+    } else {
+      assert (edges_.empty());
+      assert (vertex_fans_.empty());
+      // assert (face_centers_.empty());
+      // assert (edge_centers_.empty());
+      assert (edge_map_.empty());
+      assert (face_to_start_offset_.empty());
     }
     vertex_fans_.resize(vertices_.size());
 
@@ -428,7 +435,7 @@ public:
       vertex_fan->pop_back();
 
       while (!vertex_fan->empty()) {
-        VertexIdx last_end_idx = faces_[new_fan.back().face_idx][new_fan.back().end_vertex_face_idx];
+        VertexIdx last_end_idx = new_fan.back().end_vertex_idx;
 
         bool found = false;
         for (size_t i = 0; i < vertex_fan->size(); ++i) {
@@ -449,6 +456,7 @@ public:
         assert(found);
 #endif
         if (!found) {
+          std::cout << old_fan.size() << ", " << new_fan.size() << std::endl;
           break;
         }
       }
@@ -465,6 +473,7 @@ public:
   }
 
   Mesh DooSabin(int repeat = 1) const {
+    std::cout << "DooSabin" << std::endl;
     assert(repeat >= 1);
     UpdateCache();
 
@@ -581,6 +590,7 @@ public:
   }
 
   Mesh CatmulClark(int repeat = 1) const {
+    std::cout << "CatmulClark" << std::endl;
     assert(repeat >= 1);
     Mesh mesh;
     mesh.vertices_ = vertices_;
@@ -704,26 +714,39 @@ public:
   }
 
   Mesh HalfDivision(int repeat = 1) const {
+    std::cout << "HalfDivision" << std::endl;
     assert(repeat >= 1);
     UpdateCache();
 
     Mesh mesh;
+
+    for (EdgeIdx edge_idx = 0; edge_idx < edges_.size(); ++edge_idx) {
+      const Edge& edge = edges_[edge_idx];
+      const Vector& a = vertices_[edge.start_vertex_idx];
+      const Vector& b = vertices_[edge.end_vertex_idx];
+      mesh.vertices_.push_back((a + b) / 2.0);
+      mesh.edge_centers_[edge_idx] = mesh.vertices_.size() - 1;
+    }
 
     for (const Face& face : faces_) {
       Face new_face;
       for (VertexIdx vertex_idx = 0; vertex_idx < face.size(); vertex_idx++) {
         VertexPair pair = MakeVertexPair(face[vertex_idx],
                                          face[(vertex_idx + 1) % face.size()]);
-        const Vector& a = vertices_[pair.first];
-        const Vector& b = vertices_[pair.second];
-        mesh.vertices_.push_back((a + b) / 2.0);
-        new_face.push_back(mesh.vertices_.size() - 1);
+
         auto edge_iter = edge_map_.find(pair);
 #ifdef ENSUREMANIFOLD
-        assert(edge_iter != edge_map_.end())
+        assert(edge_iter != edge_map_.end());
 #endif
         if (edge_iter != edge_map_.end()) {
-          mesh.edge_centers_[edge_iter->second] = mesh.vertices_.size() - 1;
+          // the edge has two sides -> they should share the center vertex
+          new_face.push_back(mesh.edge_centers_[edge_iter->second]);
+        } else {
+          // the edge has only one side
+          const Vector& a = vertices_[pair.first];
+          const Vector& b = vertices_[pair.second];
+          mesh.vertices_.push_back((a + b) / 2.0);
+          new_face.push_back(mesh.vertices_.size() - 1);
         }
       }
 
@@ -744,13 +767,19 @@ public:
         const HalfEdge& half_edge = vertex_fan[i];
         VertexPair pair = MakeVertexPair(half_edge.start_vertex_idx,
                                          half_edge.end_vertex_idx);
+        // std::cout << pair.first << ", " << pair.second << std::endl;
         auto edge_iter = edge_map_.find(pair);
-        assert(edge_iter != edge_map_.end());
+        // assert(edge_iter != edge_map_.end());
         if (edge_iter == edge_map_.end()) {
           continue;
         }
         EdgeIdx edge_idx = edge_iter->second;
-        VertexIdx edge_center = edge_centers_[edge_idx]; // todo assert
+        auto edge_center_iter = mesh.edge_centers_.find(edge_idx);
+        assert(edge_center_iter != mesh.edge_centers_.end());
+        if (edge_center_iter == mesh.edge_centers_.end()) {
+          continue;
+        }
+        VertexIdx edge_center = edge_center_iter->second;
         vertex_face.push_back(edge_center);
       }
       if (vertex_face.size() < 3) {
@@ -760,7 +789,6 @@ public:
       mesh.faces_.push_back(vertex_face);
       mesh.normals_.push_back(CalculateNormal(vertex_face, mesh.vertices_));
     }
-
 
     if (repeat == 1) {
       return mesh;
@@ -784,8 +812,8 @@ private:
 
 // Mesh mesh("stuff.obj");
 // Mesh mesh("cube.obj");
-Mesh mesh("cube2.obj");
-// Mesh mesh("teapot.obj");
+// Mesh mesh("cube2.obj");
+Mesh mesh("teapot.obj");
 // Mesh mesh("teddy.obj");
 // Mesh mesh("humanoid_quad.obj");
 // Mesh mesh("skyscraper.obj");
@@ -794,7 +822,8 @@ Mesh mesh("cube2.obj");
 
 // Mesh mesh2(mesh.DooSabin(2));
 // Mesh mesh2(mesh.CatmulClark(2));
-Mesh mesh2(mesh.HalfDivision());
+// Mesh mesh2(mesh.HalfDivision(2));
+Mesh mesh2(mesh.DooSabin().CatmulClark().HalfDivision());
 
 void onDisplay() {
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -806,7 +835,7 @@ void onDisplay() {
   setSun();
 
   glPushMatrix(); {
-    // glEnable(GL_CULL_FACE);
+    glEnable(GL_CULL_FACE);
     glTranslatef(0, 5.0f, 0);
     // glScalef(0.2f, 0.2f, 0.2f);
     glColor3f(1, 0, 0);
