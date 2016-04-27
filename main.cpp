@@ -29,30 +29,30 @@
 #endif
 
 struct Vector {
-  float x, y, z;
+  double x, y, z;
 
-  Vector(float v = 0) : x(v), y(v), z(v) { }
-  Vector(float x, float y, float z) : x(x), y(y), z(z) { }
+  Vector(double v = 0) : x(v), y(v), z(v) { }
+  Vector(double x, double y, double z) : x(x), y(y), z(z) { }
   Vector operator+(const Vector& v) const { return Vector(x + v.x, y + v.y, z + v.z); }
   Vector operator-(const Vector& v) const { return Vector(x - v.x, y - v.y, z - v.z); }
   Vector operator*(const Vector& v) const { return Vector(x * v.x, y * v.y, z * v.z); }
   Vector operator/(const Vector& v) const { return Vector(x / v.x, y / v.y, z / v.z); }
-  friend Vector operator+(float f, const Vector& v) { return v+f; }
-  friend Vector operator-(float f, const Vector& v) { return Vector(f)-v; }
-  friend Vector operator*(float f, const Vector& v) { return v*f; }
-  friend Vector operator/(float f, const Vector& v) { return Vector(f)/v; }
+  friend Vector operator+(double f, const Vector& v) { return v+f; }
+  friend Vector operator-(double f, const Vector& v) { return Vector(f)-v; }
+  friend Vector operator*(double f, const Vector& v) { return v*f; }
+  friend Vector operator/(double f, const Vector& v) { return Vector(f)/v; }
   Vector& operator+=(const Vector& v) { x += v.x, y += v.y, z += v.z; return *this; }
   Vector& operator-=(const Vector& v) { x -= v.x, y -= v.y, z -= v.z; return *this; }
   Vector& operator*=(const Vector& v) { x *= v.x, y *= v.y, z *= v.z; return *this; }
   Vector& operator/=(const Vector& v) { x /= v.x, y /= v.y, z /= v.z; return *this; }
   Vector operator-() const { return Vector(-x, -y, -z); }
-  float dot(const Vector& v) const { return x*v.x + y*v.y + z*v.z; }
-  friend float dot(const Vector& a, const Vector& b) { return a.dot(b); }
+  double dot(const Vector& v) const { return x*v.x + y*v.y + z*v.z; }
+  friend double dot(const Vector& a, const Vector& b) { return a.dot(b); }
   Vector cross(const Vector& v) const { return Vector(y*v.z - z*v.y, z*v.x - x*v.z, x*v.y - y*v.x); }
   friend Vector cross(const Vector& a, const Vector& b) { return a.cross(b); }
-  float length() const { return sqrt(x*x + y*y + z*z); }
-  Vector normalize() const { float l = length(); if(l > 1e-3) { return (*this/l); } else { return Vector(); } }
-  bool isNull() const { return length() < 1e-3; }
+  double length() const { return sqrt(x*x + y*y + z*z); }
+  Vector normalize() const { double l = length(); if(l > 1e-5) { return (*this/l); } else { assert(false); return Vector(); } }
+  bool isNull() const { return length() < 1e-5; }
 };
 
 enum ControllKeys {W, A, S, D, keys_num};
@@ -60,11 +60,11 @@ bool keys_down[keys_num];
 
 struct Camera {
   Vector fwd, pos;
-  const float speed, mouse_speed;
+  const double speed, mouse_speed;
 
-  Camera(float speed = 5, float mouse_speed = 0.002f) : fwd(Vector(9, 0, 4).normalize()), pos(-9, 5, -4), speed(speed), mouse_speed(mouse_speed) { }
+  Camera(double speed = 5, double mouse_speed = 0.002f) : fwd(Vector(9, 0, 4).normalize()), pos(-9, 5, -4), speed(speed), mouse_speed(mouse_speed) { }
 
-  void updatePos(float dt) {
+  void updatePos(double dt) {
     Vector up = Vector(0, 1, 0), right = cross(fwd, up).normalize();
     up = cross(right, fwd).normalize();
 
@@ -86,7 +86,7 @@ struct Camera {
     Vector up = cross(right, fwd).normalize();
 
     // Ha teljesen felfele / lefele néznénk, akkor ne forduljon át a kamera
-    float dot_up_fwd = dot(y_axis, fwd);
+    double dot_up_fwd = dot(y_axis, fwd);
     if(dot_up_fwd > 0.95f && dy > 0) {
       dy = 0;
     }
@@ -145,7 +145,7 @@ void drawCube(const Vector& size) {
   } glEnd();
 }
 
-GLfloat black[4] = {0, 0, 0, 1};
+float black[4] = {0, 0, 0, 1};
 
 void setSun() {
   {
@@ -179,7 +179,7 @@ void setLighting(int i) {
   glLightf(GL_LIGHT0 + i, GL_CONSTANT, 0.0f);
   glLightf(GL_LIGHT0 + i, GL_QUADRATIC_ATTENUATION, 1.0f);
 
-  GLfloat c[4] = {0.3f, 0.3f, 0.3f, 1};
+  float c[4] = {0.3f, 0.3f, 0.3f, 1};
   glLightfv(GL_LIGHT0 + i, GL_DIFFUSE, c);
   glLightfv(GL_LIGHT0 + i, GL_AMBIENT, black);
   glEnable(GL_LIGHT0 + i);
@@ -188,7 +188,7 @@ void setLighting(int i) {
 GLUquadric *quad = gluNewQuadric();
 
 struct Tree {
-  float size;
+  double size;
   Vector pos;
   bool valid;
 
@@ -217,7 +217,7 @@ struct Forest {
   Forest() {
     for(int i = 0; i < 13; i++)
       for(int j = 0; j < 13; j++) {
-        float x = i*15 - 90, y = j*15 - 90;
+        double x = i*15 - 90, y = j*15 - 90;
         if(fabs(x) < 50 && fabs(y) < 50) {
           trees[i][j].valid = false;
           continue;
@@ -316,11 +316,6 @@ VertexPair MakeVertexPair(VertexIdx a, VertexIdx b) {
 Vector CalculateNormal(const Face& face, const std::vector<Vector>& vertices) {
   if (face.size() < 3) {
     return Vector(0, 0, 0);
-  } else if (face.size() <= 4) {
-    auto vertex0 = vertices[face[0]];
-    auto vertex1 = vertices[face[1]];
-    auto vertexn = vertices[face[face.size()-1]];
-    return cross((vertex1-vertex0).normalize(), (vertexn-vertex0).normalize()).normalize();
   } else {
     Vector center(0, 0, 0);
     for (VertexIdx index : face) {
@@ -330,9 +325,11 @@ Vector CalculateNormal(const Face& face, const std::vector<Vector>& vertices) {
 
     Vector normal(0, 0, 0);
     for (int i = 0; i < face.size(); ++i) {
-      Vector a = (vertices[face[i]] - center).normalize();
-      Vector b = (vertices[face[(i+1)%face.size()]] - center).normalize();
-      normal += cross(a, b);
+      Vector a = vertices[face[i]] - center;
+      Vector b = vertices[face[(i+1)%face.size()]] - center;
+      if (!a.isNull() && !b.isNull()) {
+        normal += cross(a.normalize(), b.normalize());
+      }
     }
     return normal.normalize();
   }
@@ -364,6 +361,26 @@ public:
         normals_.push_back(CalculateNormal(faces_.back(), vertices_));
       }
     }
+
+    if (!vertices_.empty()) {
+      Vector min = vertices_[0];
+      Vector max = vertices_[0];
+      for (const Vector& vertex : vertices_) {
+        min.x = std::min(vertex.x, min.x);
+        min.y = std::min(vertex.y, min.y);
+        min.z = std::min(vertex.z, min.z);
+
+        max.x = std::max(vertex.x, max.x);
+        max.y = std::max(vertex.y, max.y);
+        max.z = std::max(vertex.z, max.z);
+      }
+
+      Vector center = (max + min) / 2.0;
+      double size = (max - center).length();
+      for (Vector& vertex : vertices_) {
+        vertex = 2.0 * (vertex - center) / size;
+      }
+    }
   }
 
   void Draw() const {
@@ -392,8 +409,6 @@ public:
     } else {
       assert (edges_.empty());
       assert (vertex_fans_.empty());
-      // assert (face_centers_.empty());
-      // assert (edge_centers_.empty());
       assert (edge_map_.empty());
       assert (face_to_start_offset_.empty());
     }
@@ -456,7 +471,6 @@ public:
         assert(found);
 #endif
         if (!found) {
-          std::cout << old_fan.size() << ", " << new_fan.size() << std::endl;
           break;
         }
       }
@@ -540,7 +554,6 @@ public:
           edge_face.push_back(face_start_offset + i);
 
           mesh.faces_.push_back(edge_face);
-          mesh.normals_.push_back(CalculateNormal(edge_face, mesh.vertices_));
         } else {
 #ifdef ENSUREMANIFOLD
           assert(false);
@@ -549,7 +562,6 @@ public:
 
       }
       mesh.faces_.push_back(vertex_face);
-      mesh.normals_.push_back(CalculateNormal(face, vertices_));
     }
 
     for (const VertexFan& vertex_fan : vertex_fans_) {
@@ -578,8 +590,10 @@ public:
       }
 
       mesh.faces_.push_back(vertex_face);
-      Vector normal = CalculateNormal(vertex_face, mesh.vertices_);
-      mesh.normals_.push_back(normal);
+    }
+
+    for (const Face& face : mesh.faces_) {
+      mesh.normals_.push_back(CalculateNormal(face, mesh.vertices_));
     }
 
     if (repeat == 1) {
@@ -589,8 +603,8 @@ public:
     }
   }
 
-  Mesh CatmulClark(int repeat = 1) const {
-    std::cout << "CatmulClark" << std::endl;
+  Mesh CatmullClark(int repeat = 1) const {
+    std::cout << "CatmullClark" << std::endl;
     assert(repeat >= 1);
     Mesh mesh;
     mesh.vertices_ = vertices_;
@@ -709,12 +723,12 @@ public:
     if (repeat == 1) {
       return mesh;
     } else {
-      return mesh.CatmulClark(repeat - 1);
+      return mesh.CatmullClark(repeat - 1);
     }
   }
 
-  Mesh HalfDivision(int repeat = 1) const {
-    std::cout << "HalfDivision" << std::endl;
+  Mesh CenterDivision(int repeat = 1) const {
+    std::cout << "CenterDivision" << std::endl;
     assert(repeat >= 1);
     UpdateCache();
 
@@ -767,9 +781,7 @@ public:
         const HalfEdge& half_edge = vertex_fan[i];
         VertexPair pair = MakeVertexPair(half_edge.start_vertex_idx,
                                          half_edge.end_vertex_idx);
-        // std::cout << pair.first << ", " << pair.second << std::endl;
         auto edge_iter = edge_map_.find(pair);
-        // assert(edge_iter != edge_map_.end());
         if (edge_iter == edge_map_.end()) {
           continue;
         }
@@ -793,7 +805,7 @@ public:
     if (repeat == 1) {
       return mesh;
     } else {
-      return mesh.HalfDivision(repeat - 1);
+      return mesh.CenterDivision(repeat - 1);
     }
   }
 
@@ -813,17 +825,17 @@ private:
 // Mesh mesh("stuff.obj");
 // Mesh mesh("cube.obj");
 // Mesh mesh("cube2.obj");
-Mesh mesh("teapot.obj");
+// Mesh mesh("teapot.obj");
 // Mesh mesh("teddy.obj");
 // Mesh mesh("humanoid_quad.obj");
 // Mesh mesh("skyscraper.obj");
 // Mesh mesh("al.obj");
-// Mesh mesh("cessna.obj");
+Mesh mesh("cessna.obj");
 
-// Mesh mesh2(mesh.DooSabin(2));
-// Mesh mesh2(mesh.CatmulClark(2));
-// Mesh mesh2(mesh.HalfDivision(2));
-Mesh mesh2(mesh.DooSabin().CatmulClark().HalfDivision());
+Mesh doo_sabin_mesh(mesh.DooSabin(2));
+Mesh catmull_clark_mesh(mesh.CatmullClark(2));
+Mesh center_division_mesh(mesh.CenterDivision(2));
+// Mesh mesh2(mesh.DooSabin().CatmullClark().CenterDivision());
 
 void onDisplay() {
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -836,14 +848,23 @@ void onDisplay() {
 
   glPushMatrix(); {
     glEnable(GL_CULL_FACE);
-    glTranslatef(0, 5.0f, 0);
+    glTranslatef(0, 2.0f, 0);
     // glScalef(0.2f, 0.2f, 0.2f);
     glColor3f(1, 0, 0);
     mesh.Draw();
 
-    glTranslatef(8.0f, 0.0f, 0);
-    glColor3f(0.2, 0.4, 0.6);
-    mesh2.Draw();
+    glTranslatef(4.0f, 0.0f, 0);
+    glColor3f(0.2, 0.4, 0.8);
+    doo_sabin_mesh.Draw();
+
+    glTranslatef(4.0f, 0.0f, 0);
+    glColor3f(0.6, 0.6, 0.0);
+    catmull_clark_mesh.Draw();
+
+    glTranslatef(4.0f, 0.0f, 0);
+    glColor3f(0.2, 0.8, 0.2);
+    center_division_mesh.Draw();
+
     glDisable(GL_CULL_FACE);
   } glPopMatrix();
 
@@ -853,9 +874,9 @@ void onDisplay() {
 }
 
 void onIdle() {
-  static float last_time = glutGet(GLUT_ELAPSED_TIME);
-  float time = glutGet(GLUT_ELAPSED_TIME);
-  float dt = (time - last_time) / 1000.0f;
+  static double last_time = glutGet(GLUT_ELAPSED_TIME);
+  double time = glutGet(GLUT_ELAPSED_TIME);
+  double dt = (time - last_time) / 1000.0f;
   last_time = time;
 
   camera.updatePos(dt);
@@ -881,7 +902,7 @@ void onInitialization() {
 void onReshape(int w, int h) {
   glMatrixMode(GL_PROJECTION);
   glLoadIdentity();
-  gluPerspective(60, float(h)/float(w), 0.2, 200);
+  gluPerspective(60, double(h)/double(w), 0.2, 200);
   glMatrixMode(GL_MODELVIEW);
 }
 
