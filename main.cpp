@@ -1,5 +1,5 @@
-#include <math.h>
-#include <stdlib.h>
+#include <cmath>
+#include <cstdlib>
 
 #if defined(__APPLE__)
   #include <OpenGL/gl.h>
@@ -23,6 +23,9 @@
 #include <assimp/Importer.hpp>
 #include <assimp/scene.h>
 #include <assimp/postprocess.h>
+
+#define GLM_FORCE_RADIANS
+#include <glm/glm.hpp>
 
 #ifndef M_PI
   #define M_PI 3.14159265359
@@ -55,7 +58,14 @@ struct Vector {
   bool isNull() const { return length() < 1e-5; }
 };
 
-enum ControllKeys {W, A, S, D, keys_num};
+struct Rectangle {
+  int x1, x2, y1, y2;
+  Rectangle(int x1, int x2, int y1, int y2) : x1(x1), x2(x2), y1(y1), y2(y2) {}
+} selection_rect{0, 0, 0, 0};
+bool selection_mode_on = false;
+int screen_w = 600, screen_h = 600;
+
+enum ControllKeys {W, A, S, D, B, keys_num};
 bool keys_down[keys_num];
 
 struct Camera {
@@ -309,6 +319,8 @@ struct Edge {
   FaceIdx first_face_idx, second_face_idx;
 };
 
+std::vector<VertexIdx> selected_vertices;
+
 VertexPair MakeVertexPair(VertexIdx a, VertexIdx b) {
   return std::make_pair(std::min(a, b), std::max(a, b));
 }
@@ -404,7 +416,6 @@ public:
 
   void UpdateCache() const {
     if (!edges_.empty()) {
-      std::cout << "Update cache called with cache up to date" << std::endl;
       return;
     } else {
       assert (edges_.empty());
@@ -809,6 +820,8 @@ public:
     }
   }
 
+  const std::vector<Vector>& vertices() const { return vertices_; }
+
 private:
   std::vector<Vector> vertices_;
   std::vector<Face> faces_;
@@ -822,23 +835,19 @@ private:
   mutable std::map<FaceIdx, Offset> face_to_start_offset_;
 };
 
-// Mesh mesh("stuff.obj");
-// Mesh mesh("cube.obj");
-// Mesh mesh("cube2.obj");
-// Mesh mesh("teapot.obj");
-// Mesh mesh("teddy.obj");
-// Mesh mesh("humanoid_quad.obj");
-// Mesh mesh("skyscraper.obj");
-// Mesh mesh("al.obj");
-Mesh mesh("cessna.obj");
+Mesh mesh("objs/teddy.obj");
 
-Mesh doo_sabin_mesh(mesh.DooSabin(2));
-Mesh catmull_clark_mesh(mesh.CatmullClark(2));
-Mesh center_division_mesh(mesh.CenterDivision(2));
-// Mesh mesh2(mesh.DooSabin().CatmullClark().CenterDivision());
+int subdivision_iteration_count = 1;
+Mesh doo_sabin_mesh(mesh.DooSabin(subdivision_iteration_count));
+Mesh catmull_clark_mesh(mesh.CatmullClark(subdivision_iteration_count));
+Mesh center_division_mesh(mesh.CenterDivision(subdivision_iteration_count));
 
 void onDisplay() {
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+  glMatrixMode(GL_PROJECTION);
+  glLoadIdentity();
+  gluPerspective(60, double(screen_w)/double(screen_h), 0.2, 200);
 
   glMatrixMode(GL_MODELVIEW);
   glLoadIdentity();
@@ -849,9 +858,15 @@ void onDisplay() {
   glPushMatrix(); {
     glEnable(GL_CULL_FACE);
     glTranslatef(0, 2.0f, 0);
-    // glScalef(0.2f, 0.2f, 0.2f);
     glColor3f(1, 0, 0);
     mesh.Draw();
+
+    glBegin(GL_POINTS);
+    for (VertexIdx i = 0; i < selected_vertices.size(); ++i) {
+      const Vector& vertex = mesh.vertices()[selected_vertices[i]];
+      glVertex3f(vertex.x, vertex.y, vertex.z);
+    }
+    glEnd();
 
     glTranslatef(4.0f, 0.0f, 0);
     glColor3f(0.2, 0.4, 0.8);
@@ -869,6 +884,31 @@ void onDisplay() {
   } glPopMatrix();
 
   drawPantheon();
+
+  if (selection_mode_on) {
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_LIGHTING);
+
+    glColor3f(1, 1, 0);
+
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
+    gluOrtho2D(0, screen_w, screen_h, 0);
+
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+
+    glBegin(GL_LINE_STRIP);
+      glVertex2f(selection_rect.x1, selection_rect.y1);
+      glVertex2f(selection_rect.x2, selection_rect.y1);
+      glVertex2f(selection_rect.x2, selection_rect.y2);
+      glVertex2f(selection_rect.x1, selection_rect.y2);
+      glVertex2f(selection_rect.x1, selection_rect.y1);
+    glEnd();
+
+    glEnable(GL_DEPTH_TEST);
+    glEnable(GL_LIGHTING);
+  }
 
   glutSwapBuffers();
 }
@@ -891,6 +931,8 @@ void onInitialization() {
   gluPerspective(60, 1, 0.2, 200);
   glMatrixMode(GL_MODELVIEW);
 
+  glLineWidth(2.0);
+  glPointSize(3.0);
   glFrontFace(GL_CCW);
   glCullFace(GL_BACK);
 
@@ -900,9 +942,12 @@ void onInitialization() {
 }
 
 void onReshape(int w, int h) {
+  screen_w = w;
+  screen_h = h;
   glMatrixMode(GL_PROJECTION);
   glLoadIdentity();
-  gluPerspective(60, double(h)/double(w), 0.2, 200);
+  gluPerspective(60, double(w)/double(h), 0.2, 200);
+  glViewport(0, 0, w, h);
   glMatrixMode(GL_MODELVIEW);
 }
 
@@ -920,11 +965,90 @@ void onKeyboard(unsigned char key, int, int) {
     case 'd': case 'D':
       keys_down[D] = true;
       break;
+    case 'b': case 'B':
+      keys_down[B] = true;
+      break;
+    case '+':
+      if (subdivision_iteration_count < 8) {
+        subdivision_iteration_count++;
+        doo_sabin_mesh = doo_sabin_mesh.DooSabin();
+        catmull_clark_mesh = catmull_clark_mesh.CatmullClark();
+        center_division_mesh = center_division_mesh.CenterDivision();
+      }
+      break;
+    case '-':
+      if (subdivision_iteration_count > 1) {
+        subdivision_iteration_count--;
+        doo_sabin_mesh = mesh.DooSabin(subdivision_iteration_count);
+        catmull_clark_mesh = mesh.CatmullClark(subdivision_iteration_count);
+        center_division_mesh = mesh.CenterDivision(subdivision_iteration_count);
+      }
+      break;
+    case '0':
+      mesh = Mesh("objs/stuff.obj");
+      doo_sabin_mesh = mesh.DooSabin(subdivision_iteration_count);
+      catmull_clark_mesh = mesh.CatmullClark(subdivision_iteration_count);
+      center_division_mesh = mesh.CenterDivision(subdivision_iteration_count);
+    break;
+    case '1':
+      mesh = Mesh("objs/cube.obj");
+      doo_sabin_mesh = mesh.DooSabin(subdivision_iteration_count);
+      catmull_clark_mesh = mesh.CatmullClark(subdivision_iteration_count);
+      center_division_mesh = mesh.CenterDivision(subdivision_iteration_count);
+    break;
+    case '2':
+      mesh = Mesh("objs/cube2.obj");
+      doo_sabin_mesh = mesh.DooSabin(subdivision_iteration_count);
+      catmull_clark_mesh = mesh.CatmullClark(subdivision_iteration_count);
+      center_division_mesh = mesh.CenterDivision(subdivision_iteration_count);
+    break;
+    case '3':
+      mesh = Mesh("objs/teapot.obj");
+      doo_sabin_mesh = mesh.DooSabin(subdivision_iteration_count);
+      catmull_clark_mesh = mesh.CatmullClark(subdivision_iteration_count);
+      center_division_mesh = mesh.CenterDivision(subdivision_iteration_count);
+    break;
+    case '4':
+      mesh = Mesh("objs/teddy.obj");
+      doo_sabin_mesh = mesh.DooSabin(subdivision_iteration_count);
+      catmull_clark_mesh = mesh.CatmullClark(subdivision_iteration_count);
+      center_division_mesh = mesh.CenterDivision(subdivision_iteration_count);
+    break;
+    case '5':
+      mesh = Mesh("objs/humanoid_quad.obj");
+      doo_sabin_mesh = mesh.DooSabin(subdivision_iteration_count);
+      catmull_clark_mesh = mesh.CatmullClark(subdivision_iteration_count);
+      center_division_mesh = mesh.CenterDivision(subdivision_iteration_count);
+    break;
+    case '6':
+      mesh = Mesh("objs/skyscraper.obj");
+      doo_sabin_mesh = mesh.DooSabin(subdivision_iteration_count);
+      catmull_clark_mesh = mesh.CatmullClark(subdivision_iteration_count);
+      center_division_mesh = mesh.CenterDivision(subdivision_iteration_count);
+    break;
+    case '7':
+      mesh = Mesh("objs/al.obj");
+      doo_sabin_mesh = mesh.DooSabin(subdivision_iteration_count);
+      catmull_clark_mesh = mesh.CatmullClark(subdivision_iteration_count);
+      center_division_mesh = mesh.CenterDivision(subdivision_iteration_count);
+    break;
+    case '8':
+      mesh = Mesh("objs/cessna.obj");
+      doo_sabin_mesh = mesh.DooSabin(subdivision_iteration_count);
+      catmull_clark_mesh = mesh.CatmullClark(subdivision_iteration_count);
+      center_division_mesh = mesh.CenterDivision(subdivision_iteration_count);
+    break;
+    case '9':
+      mesh = Mesh("objs/cow.obj");
+      doo_sabin_mesh = mesh.DooSabin(subdivision_iteration_count);
+      catmull_clark_mesh = mesh.CatmullClark(subdivision_iteration_count);
+      center_division_mesh = mesh.CenterDivision(subdivision_iteration_count);
+    break;
   }
 }
 
 void onKeyboardUp(unsigned char key, int, int) {
-    switch(key) {
+  switch(key) {
     case 'w': case 'W':
       keys_down[W] = false;
       break;
@@ -937,28 +1061,114 @@ void onKeyboardUp(unsigned char key, int, int) {
     case 'd': case 'D':
       keys_down[D] = false;
       break;
+    case 'b': case 'B':
+      keys_down[B] = false;
+      break;
   }
 }
 
+bool IsInsideSelection(GLfloat matrix[16], const Rectangle& rect, const Vector& vertex) {
+
+  double point[4] = {vertex.x, vertex.y, vertex.z, 1};
+  double projection[4] = {0, 0, 0, 0};
+  // for (int y = 0; y < 4; ++y) {
+  //   for (int x = 0; x < 4; ++x) {
+  //     projection[y] += point[x] * matrix[4*x+y];
+  //   }
+  // }
+
+  // projection[0] = point[0]*matrix[0] + point[1]*matrix[1] + point[2]*matrix[2] + point[3]*matrix[3];
+  // projection[1] = point[0]*matrix[4] + point[1]*matrix[5] + point[2]*matrix[6] + point[3]*matrix[7];
+  // projection[2] = point[0]*matrix[8] + point[1]*matrix[9] + point[2]*matrix[10] + point[3]*matrix[11];
+  // projection[3] = point[0]*matrix[12] + point[1]*matrix[13] + point[2]*matrix[14] + point[3]*matrix[15];
+
+  projection[0] = point[0]*matrix[0] + point[1]*matrix[4] + point[2]*matrix[8] + point[3]*matrix[12];
+  projection[1] = point[0]*matrix[1] + point[1]*matrix[5] + point[2]*matrix[9] + point[3]*matrix[13];
+  projection[2] = point[0]*matrix[2] + point[1]*matrix[6] + point[2]*matrix[10] + point[3]*matrix[14];
+  projection[3] = point[0]*matrix[3] + point[1]*matrix[7] + point[2]*matrix[11] + point[3]*matrix[15];
+  // std::cout << projection[0]/projection[3] << ", " << projection[1]/projection[3] << ", " << projection[2]/projection[3] << std::endl;
+  // std::cout << projection[0] << ", " << projection[1] << ", " << projection[2] << ", " << projection[3] << std::endl;
+
+
+  projection[0] = (projection[0]/projection[3] + 1.0) * screen_w / 2.0;
+  projection[1] = (-projection[1]/projection[3] + 1.0) * screen_h / 2.0;
+  projection[2] = projection[2]/projection[3];
+  projection[3] = projection[3]/projection[3];
+
+  // std::cout << projection[0] << ", " << projection[1] << std::endl;
+  // std::cout << projection[0] << ", " << projection[1] << ", " << projection[2] << ", " << projection[3] << std::endl;
+
+
+  bool inside = rect.x1 <= projection[0] && projection[0] <= rect.x2 &&
+                rect.y1 <= projection[1] && projection[1] <= rect.y2;
+  // if (inside) {
+  //   std::cout << vertex.x << ", " << vertex.y << ", " << vertex.z << std::endl;
+  //   std::cout << rect.x1 << ", " << rect.x2 << ", " << rect.y1 << ", " << rect.y2 << std::endl;
+  //   std::cout << projection[0] << ", " << projection[1] << ", " << projection[2] << ", " << projection[3] << std::endl << std::endl;
+  // }
+
+  return inside;
+}
+
 int last_x, last_y;
-void onMouse(int, int, int x, int y) {
+void onMouse(int button, int state, int x, int y) {
   last_x = x;
   last_y = y;
+  if (button == GLUT_LEFT_BUTTON) {
+    if (state == GLUT_DOWN) {
+      if (keys_down[B]/* && !selection_mode_on*/) {
+        selection_mode_on = true;
+        selection_rect.x1 = selection_rect.x2 = x;
+        selection_rect.y1 = selection_rect.y2 = y;
+      }
+    } else if (state == GLUT_UP && selection_mode_on) {
+      selected_vertices.clear();
+      int min_x = std::min(selection_rect.x1, selection_rect.x2);
+      int max_x = std::max(selection_rect.x1, selection_rect.x2);
+      int min_y = std::min(selection_rect.y1, selection_rect.y2);
+      int max_y = std::max(selection_rect.y1, selection_rect.y2);
+      Rectangle rect = Rectangle{min_x, max_x, min_y, max_y};
+      GLfloat matrix[16];
+      glMatrixMode(GL_MODELVIEW);
+      glPushMatrix();
+        glLoadIdentity();
+        gluPerspective(90, double(screen_w)/double(screen_h), 0.2, 200);
+        camera.applyMatrix();
+        glTranslatef(0, 2.0f, 0);
+        glGetFloatv (GL_MODELVIEW_MATRIX, matrix);
+      glPopMatrix();
+      for (VertexIdx i = 0; i < mesh.vertices().size(); ++i) {
+        if (IsInsideSelection(matrix, rect, mesh.vertices()[i])) {
+          selected_vertices.push_back(i);
+        }
+      }
+      std::cout << selected_vertices.size() << std::endl;
+      selection_mode_on = false;
+    }
+  } else if (button == GLUT_RIGHT_BUTTON) {
+    selected_vertices.clear();
+  }
 }
 
 void onMouseMotion(int x, int y) {
-  camera.updateDir(x-last_x, last_y-y);
+  if (selection_mode_on) {
+    selection_rect.x2 = x;
+    selection_rect.y2 = y;
+  } else {
+    camera.updateDir(x-last_x, last_y-y);
+  }
+
   last_x = x;
   last_y = y;
 }
 
 int main(int argc, char **argv) {
   glutInit(&argc, argv);
-  glutInitWindowSize(600, 600);
+  glutInitWindowSize(screen_w, screen_h);
   glutInitWindowPosition(100, 100);
   glutInitDisplayMode(GLUT_RGBA | GLUT_DOUBLE | GLUT_DEPTH);
 
-  glutCreateWindow("Grafika pelda program");
+  glutCreateWindow("Subdivision surfaces demo");
 
   glMatrixMode(GL_MODELVIEW);
   glLoadIdentity();
@@ -973,7 +1183,7 @@ int main(int argc, char **argv) {
   glutKeyboardFunc(onKeyboard);
   glutKeyboardUpFunc(onKeyboardUp);
   glutMotionFunc(onMouseMotion);
-  // glutReshapeFunc(onReshape);
+  glutReshapeFunc(onReshape);
 
   glutMainLoop();
 
