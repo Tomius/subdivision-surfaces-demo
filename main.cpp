@@ -862,10 +862,13 @@ void onDisplay() {
     mesh.Draw();
 
     glBegin(GL_POINTS);
+    glDisable(GL_LIGHTING);
+    glColor3f(0, 0, 0);
     for (VertexIdx i = 0; i < selected_vertices.size(); ++i) {
       const Vector& vertex = mesh.vertices()[selected_vertices[i]];
       glVertex3f(vertex.x, vertex.y, vertex.z);
     }
+    glEnable(GL_LIGHTING);
     glEnd();
 
     glTranslatef(4.0f, 0.0f, 0);
@@ -1071,41 +1074,17 @@ bool IsInsideSelection(GLfloat matrix[16], const Rectangle& rect, const Vector& 
 
   double point[4] = {vertex.x, vertex.y, vertex.z, 1};
   double projection[4] = {0, 0, 0, 0};
-  // for (int y = 0; y < 4; ++y) {
-  //   for (int x = 0; x < 4; ++x) {
-  //     projection[y] += point[x] * matrix[4*x+y];
-  //   }
-  // }
-
-  // projection[0] = point[0]*matrix[0] + point[1]*matrix[1] + point[2]*matrix[2] + point[3]*matrix[3];
-  // projection[1] = point[0]*matrix[4] + point[1]*matrix[5] + point[2]*matrix[6] + point[3]*matrix[7];
-  // projection[2] = point[0]*matrix[8] + point[1]*matrix[9] + point[2]*matrix[10] + point[3]*matrix[11];
-  // projection[3] = point[0]*matrix[12] + point[1]*matrix[13] + point[2]*matrix[14] + point[3]*matrix[15];
-
-  projection[0] = point[0]*matrix[0] + point[1]*matrix[4] + point[2]*matrix[8] + point[3]*matrix[12];
-  projection[1] = point[0]*matrix[1] + point[1]*matrix[5] + point[2]*matrix[9] + point[3]*matrix[13];
-  projection[2] = point[0]*matrix[2] + point[1]*matrix[6] + point[2]*matrix[10] + point[3]*matrix[14];
-  projection[3] = point[0]*matrix[3] + point[1]*matrix[7] + point[2]*matrix[11] + point[3]*matrix[15];
-  // std::cout << projection[0]/projection[3] << ", " << projection[1]/projection[3] << ", " << projection[2]/projection[3] << std::endl;
-  // std::cout << projection[0] << ", " << projection[1] << ", " << projection[2] << ", " << projection[3] << std::endl;
-
+  for (int y = 0; y < 4; ++y) {
+    for (int x = 0; x < 4; ++x) {
+      projection[y] += point[x] * matrix[4*x+y];
+    }
+  }
 
   projection[0] = (projection[0]/projection[3] + 1.0) * screen_w / 2.0;
   projection[1] = (-projection[1]/projection[3] + 1.0) * screen_h / 2.0;
-  projection[2] = projection[2]/projection[3];
-  projection[3] = projection[3]/projection[3];
-
-  // std::cout << projection[0] << ", " << projection[1] << std::endl;
-  // std::cout << projection[0] << ", " << projection[1] << ", " << projection[2] << ", " << projection[3] << std::endl;
-
 
   bool inside = rect.x1 <= projection[0] && projection[0] <= rect.x2 &&
                 rect.y1 <= projection[1] && projection[1] <= rect.y2;
-  // if (inside) {
-  //   std::cout << vertex.x << ", " << vertex.y << ", " << vertex.z << std::endl;
-  //   std::cout << rect.x1 << ", " << rect.x2 << ", " << rect.y1 << ", " << rect.y2 << std::endl;
-  //   std::cout << projection[0] << ", " << projection[1] << ", " << projection[2] << ", " << projection[3] << std::endl << std::endl;
-  // }
 
   return inside;
 }
@@ -1132,7 +1111,7 @@ void onMouse(int button, int state, int x, int y) {
       glMatrixMode(GL_MODELVIEW);
       glPushMatrix();
         glLoadIdentity();
-        gluPerspective(90, double(screen_w)/double(screen_h), 0.2, 200);
+        gluPerspective(60, double(screen_w)/double(screen_h), 0.2, 200);
         camera.applyMatrix();
         glTranslatef(0, 2.0f, 0);
         glGetFloatv (GL_MODELVIEW_MATRIX, matrix);
@@ -1142,7 +1121,6 @@ void onMouse(int button, int state, int x, int y) {
           selected_vertices.push_back(i);
         }
       }
-      std::cout << selected_vertices.size() << std::endl;
       selection_mode_on = false;
     }
   } else if (button == GLUT_RIGHT_BUTTON) {
