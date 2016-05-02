@@ -62,14 +62,17 @@ struct SelectionRectangle {
 bool selection_mode_on = false;
 int screen_w = 600, screen_h = 600;
 
-enum ControllKeys {W, A, S, D, B, keys_num};
+enum ControllKeys {W, A, S, D, B, V, keys_num};
 bool keys_down[keys_num];
+bool draw_smooth_normal = false;
+bool draw_wireframe = true;
+int mesh_idx = 4;
 
 struct Camera {
   Vector fwd, pos;
   const double speed, mouse_speed;
 
-  Camera(double speed = 5, double mouse_speed = 0.002f) : fwd(Vector(9, 0, 4).normalize()), pos(-9, 5, -4), speed(speed), mouse_speed(mouse_speed) { }
+  Camera(double speed = 8, double mouse_speed = 0.002f) : fwd(Vector(9, 0, 4).normalize()), pos(-9, 5, -4), speed(speed), mouse_speed(mouse_speed) { }
 
   void updatePos(double dt) {
     Vector up = Vector(0, 1, 0), right = cross(fwd, up).normalize();
@@ -356,8 +359,12 @@ public:
       assert(!mesh->HasNormals());
       Offset vertex_index_start = vertices_.size();
       for (unsigned vertex_idx = 0; vertex_idx < mesh->mNumVertices; ++vertex_idx) {
-        auto vertex = mesh->mVertices[vertex_idx];
-        vertices_.push_back({vertex.x, vertex.y, vertex.z});
+        const auto& vertex = mesh->mVertices[vertex_idx];
+        if (filename == "objs/humanoid_quad.obj") {
+          vertices_.push_back({vertex.y, vertex.z, vertex.x});
+        } else {
+          vertices_.push_back({vertex.x, vertex.y, vertex.z});
+        }
       }
 
       for (FaceIdx face_idx = 0; face_idx < mesh->mNumFaces; face_idx++) {
@@ -386,27 +393,50 @@ public:
       Vector center = (max + min) / 2.0;
       double size = (max - center).length();
       for (Vector& vertex : vertices_) {
-        vertex = 2.0 * (vertex - center) / size;
+        vertex = 5.0 * (vertex - center) / size;
       }
+    }
+
+    std::cout << filename << " vertex count: " << vertices_.size() << std::endl;
+  }
+
+  void DrawInternal(double offset) const {
+    for (int face_idx = 0; face_idx < faces_.size(); ++face_idx) {
+      const Face& face = faces_[face_idx];
+      glBegin(GL_TRIANGLE_FAN); {
+        const auto& flat_normal = normals_[face_idx];
+        glNormal3f(flat_normal.x, flat_normal.y, flat_normal.z);
+        for (VertexIdx index : face) {
+          if (draw_smooth_normal) {
+            if (vertex_normals_.empty()) {
+              UpdateCache();
+            }
+            const Vector& smooth_normal = vertex_normals_[index];
+            if (smooth_normal.isNull()) {
+              glNormal3f(flat_normal.x, flat_normal.y, flat_normal.z);
+            } else {
+              glNormal3f(smooth_normal.x, smooth_normal.y, smooth_normal.z);
+            }
+          }
+
+          auto vertex = vertices_[index] + offset * flat_normal;
+          glVertex3f(vertex.x, vertex.y, vertex.z);
+        }
+      } glEnd();
     }
   }
 
   void Draw() const {
-    for (int face_idx = 0; face_idx < faces_.size(); ++face_idx) {
-      const Face& face = faces_[face_idx];
-      glBegin(GL_TRIANGLE_FAN); {
-        auto normal = normals_[face_idx];
-        glNormal3f(normal.x, normal.y, normal.z);
-        Vector center(0, 0, 0);
-        // for (VertexIdx index : face) {
-        //   center += vertices_[index];
-        // }
-        // center /= face.size();
-        for (VertexIdx index : face) {
-          auto vertex = vertices_[index] + center/64.0;
-          glVertex3f(vertex.x, vertex.y, vertex.z);
-        }
-      } glEnd();
+    DrawInternal(0.0);
+
+    if (draw_wireframe) {
+      glLineWidth(1.0);
+      glDisable(GL_LIGHTING);
+      glColor4f(0.5, 0.5, 0.5, 0.3);
+      glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+      DrawInternal(0.0001);
+      glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+      glEnable(GL_LIGHTING);
     }
   }
 
@@ -491,10 +521,23 @@ public:
         *vertex_fan = {}; //old_fan;
       }
     }
+
+    assert(vertices_.size() == vertex_fans_.size());
+    for (const VertexFan& vertex_fan : vertex_fans_) {
+      Vector average_normal{0.0, 0.0, 0.0};
+      for (const HalfEdge& half_edge : vertex_fan) {
+        average_normal += normals_[half_edge.face_idx];
+      }
+
+      if (average_normal.isNull()) {
+        vertex_normals_.push_back(Vector());
+      } else {
+        vertex_normals_.push_back(average_normal.normalize());
+      }
+    }
   }
 
   Mesh DooSabin(int repeat = 1) const {
-    std::cout << "DooSabin" << std::endl;
     assert(repeat >= 1);
     UpdateCache();
 
@@ -604,6 +647,7 @@ public:
     }
 
     if (repeat == 1) {
+      std::cout << "Doo-Sabin vertex count: " << mesh.vertices_.size() << std::endl;
       return mesh;
     } else {
       return mesh.DooSabin(repeat - 1);
@@ -611,7 +655,6 @@ public:
   }
 
   Mesh CatmullClark(int repeat = 1) const {
-    std::cout << "CatmullClark" << std::endl;
     assert(repeat >= 1);
     Mesh mesh;
     mesh.vertices_ = vertices_;
@@ -728,6 +771,7 @@ public:
     }
 
     if (repeat == 1) {
+      std::cout << "Catmull Clark vertex count: " << mesh.vertices_.size() << std::endl;
       return mesh;
     } else {
       return mesh.CatmullClark(repeat - 1);
@@ -735,7 +779,6 @@ public:
   }
 
   Mesh CenterDivision(int repeat = 1) const {
-    std::cout << "CenterDivision" << std::endl;
     assert(repeat >= 1);
     UpdateCache();
 
@@ -810,12 +853,14 @@ public:
     }
 
     if (repeat == 1) {
+      std::cout << "Central Division vertex count: " << mesh.vertices_.size() << std::endl;
       return mesh;
     } else {
       return mesh.CenterDivision(repeat - 1);
     }
   }
 
+  std::vector<Vector>& vertices() { return vertices_; }
   const std::vector<Vector>& vertices() const { return vertices_; }
 
 private:
@@ -825,6 +870,7 @@ private:
 
   mutable std::vector<Edge> edges_;
   mutable std::vector<VertexFan> vertex_fans_;
+  mutable std::vector<Vector> vertex_normals_;
   mutable std::map<FaceIdx, VertexIdx> face_centers_;
   mutable std::map<EdgeIdx, VertexIdx> edge_centers_;
   mutable std::map<VertexPair, EdgeIdx> edge_map_;
@@ -851,43 +897,44 @@ void onDisplay() {
   camera.applyMatrix();
   setSun();
 
+  drawPantheon();
+
   glPushMatrix(); {
     glEnable(GL_CULL_FACE);
-    glTranslatef(0, 2.0f, 0);
+    glTranslatef(-10.0f, 4.0f, 0);
     glColor3f(1, 0, 0);
     mesh.Draw();
 
-    glBegin(GL_POINTS);
     glDisable(GL_LIGHTING);
-    glColor3f(0, 0, 0);
+    glColor3f(1.0, 1.0, 1.0);
+    glBegin(GL_POINTS);
     for (VertexIdx i = 0; i < selected_vertices.size(); ++i) {
-      const Vector& vertex = mesh.vertices()[selected_vertices[i]];
+      Vector vertex = 1.0001 * mesh.vertices()[selected_vertices[i]];
       glVertex3f(vertex.x, vertex.y, vertex.z);
     }
-    glEnable(GL_LIGHTING);
     glEnd();
+    glEnable(GL_LIGHTING);
 
-    glTranslatef(4.0f, 0.0f, 0);
+    glTranslatef(8.0f, 0.0f, 0);
     glColor3f(0.2, 0.4, 0.8);
     doo_sabin_mesh.Draw();
 
-    glTranslatef(4.0f, 0.0f, 0);
+    glTranslatef(8.0f, 0.0f, 0);
     glColor3f(0.6, 0.6, 0.0);
     catmull_clark_mesh.Draw();
 
-    glTranslatef(4.0f, 0.0f, 0);
+    glTranslatef(8.0f, 0.0f, 0);
     glColor3f(0.2, 0.8, 0.2);
     center_division_mesh.Draw();
 
     glDisable(GL_CULL_FACE);
   } glPopMatrix();
 
-  drawPantheon();
-
   if (selection_mode_on) {
     glDisable(GL_DEPTH_TEST);
     glDisable(GL_LIGHTING);
 
+    glLineWidth(2.0);
     glColor3f(1, 1, 0);
 
     glMatrixMode(GL_MODELVIEW);
@@ -930,7 +977,6 @@ void onInitialization() {
   gluPerspective(60, 1, 0.2, 200);
   glMatrixMode(GL_MODELVIEW);
 
-  glLineWidth(2.0);
   glPointSize(3.0);
   glFrontFace(GL_CCW);
   glCullFace(GL_BACK);
@@ -938,6 +984,9 @@ void onInitialization() {
   glEnable(GL_LIGHTING);
   glEnable(GL_COLOR_MATERIAL);
   glEnable(GL_SMOOTH);
+
+  glEnable (GL_BLEND);
+  glBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 }
 
 void onReshape(int w, int h) {
@@ -945,9 +994,21 @@ void onReshape(int w, int h) {
   screen_h = h;
   glMatrixMode(GL_PROJECTION);
   glLoadIdentity();
-  gluPerspective(60, double(w)/double(h), 0.2, 200);
+  gluPerspective(60, double(w)/double(h), 0.02, 200);
   glViewport(0, 0, w, h);
   glMatrixMode(GL_MODELVIEW);
+}
+
+void UpdateSubdivisionSurfaces() {
+  selected_vertices.clear();
+  doo_sabin_mesh = mesh.DooSabin(subdivision_iteration_count);
+  catmull_clark_mesh = mesh.CatmullClark(subdivision_iteration_count);
+  center_division_mesh = mesh.CenterDivision(subdivision_iteration_count);
+}
+
+void LoadMesh(const char* file) {
+  mesh = Mesh(file);
+  UpdateSubdivisionSurfaces();
 }
 
 void onKeyboard(unsigned char key, int, int) {
@@ -967,9 +1028,19 @@ void onKeyboard(unsigned char key, int, int) {
     case 'b': case 'B':
       keys_down[B] = true;
       break;
+    case 'v': case 'V':
+      keys_down[V] = true;
+      break;
+    case 'n': case 'N':
+      draw_smooth_normal = !draw_smooth_normal;
+      break;
+    case 'm': case 'M':
+      draw_wireframe = !draw_wireframe;
+      break;
     case '+':
       if (subdivision_iteration_count < 8) {
         subdivision_iteration_count++;
+        selected_vertices.clear();
         doo_sabin_mesh = doo_sabin_mesh.DooSabin();
         catmull_clark_mesh = catmull_clark_mesh.CatmullClark();
         center_division_mesh = center_division_mesh.CenterDivision();
@@ -978,71 +1049,19 @@ void onKeyboard(unsigned char key, int, int) {
     case '-':
       if (subdivision_iteration_count > 1) {
         subdivision_iteration_count--;
-        doo_sabin_mesh = mesh.DooSabin(subdivision_iteration_count);
-        catmull_clark_mesh = mesh.CatmullClark(subdivision_iteration_count);
-        center_division_mesh = mesh.CenterDivision(subdivision_iteration_count);
+        UpdateSubdivisionSurfaces();
       }
       break;
-    case '0':
-      mesh = Mesh("objs/stuff.obj");
-      doo_sabin_mesh = mesh.DooSabin(subdivision_iteration_count);
-      catmull_clark_mesh = mesh.CatmullClark(subdivision_iteration_count);
-      center_division_mesh = mesh.CenterDivision(subdivision_iteration_count);
-    break;
-    case '1':
-      mesh = Mesh("objs/cube.obj");
-      doo_sabin_mesh = mesh.DooSabin(subdivision_iteration_count);
-      catmull_clark_mesh = mesh.CatmullClark(subdivision_iteration_count);
-      center_division_mesh = mesh.CenterDivision(subdivision_iteration_count);
-    break;
-    case '2':
-      mesh = Mesh("objs/cube2.obj");
-      doo_sabin_mesh = mesh.DooSabin(subdivision_iteration_count);
-      catmull_clark_mesh = mesh.CatmullClark(subdivision_iteration_count);
-      center_division_mesh = mesh.CenterDivision(subdivision_iteration_count);
-    break;
-    case '3':
-      mesh = Mesh("objs/teapot.obj");
-      doo_sabin_mesh = mesh.DooSabin(subdivision_iteration_count);
-      catmull_clark_mesh = mesh.CatmullClark(subdivision_iteration_count);
-      center_division_mesh = mesh.CenterDivision(subdivision_iteration_count);
-    break;
-    case '4':
-      mesh = Mesh("objs/teddy.obj");
-      doo_sabin_mesh = mesh.DooSabin(subdivision_iteration_count);
-      catmull_clark_mesh = mesh.CatmullClark(subdivision_iteration_count);
-      center_division_mesh = mesh.CenterDivision(subdivision_iteration_count);
-    break;
-    case '5':
-      mesh = Mesh("objs/humanoid_quad.obj");
-      doo_sabin_mesh = mesh.DooSabin(subdivision_iteration_count);
-      catmull_clark_mesh = mesh.CatmullClark(subdivision_iteration_count);
-      center_division_mesh = mesh.CenterDivision(subdivision_iteration_count);
-    break;
-    case '6':
-      mesh = Mesh("objs/skyscraper.obj");
-      doo_sabin_mesh = mesh.DooSabin(subdivision_iteration_count);
-      catmull_clark_mesh = mesh.CatmullClark(subdivision_iteration_count);
-      center_division_mesh = mesh.CenterDivision(subdivision_iteration_count);
-    break;
-    case '7':
-      mesh = Mesh("objs/al.obj");
-      doo_sabin_mesh = mesh.DooSabin(subdivision_iteration_count);
-      catmull_clark_mesh = mesh.CatmullClark(subdivision_iteration_count);
-      center_division_mesh = mesh.CenterDivision(subdivision_iteration_count);
-    break;
-    case '8':
-      mesh = Mesh("objs/cessna.obj");
-      doo_sabin_mesh = mesh.DooSabin(subdivision_iteration_count);
-      catmull_clark_mesh = mesh.CatmullClark(subdivision_iteration_count);
-      center_division_mesh = mesh.CenterDivision(subdivision_iteration_count);
-    break;
-    case '9':
-      mesh = Mesh("objs/cow.obj");
-      doo_sabin_mesh = mesh.DooSabin(subdivision_iteration_count);
-      catmull_clark_mesh = mesh.CatmullClark(subdivision_iteration_count);
-      center_division_mesh = mesh.CenterDivision(subdivision_iteration_count);
-    break;
+    case '0': mesh_idx = 0; LoadMesh("objs/stuff.obj"); break;
+    case '1': mesh_idx = 1; LoadMesh("objs/cube.obj"); break;
+    case '2': mesh_idx = 2; LoadMesh("objs/cube2.obj"); break;
+    case '3': mesh_idx = 3; LoadMesh("objs/teapot.obj"); break;
+    case '4': mesh_idx = 4; LoadMesh("objs/teddy.obj"); break;
+    case '5': mesh_idx = 5; LoadMesh("objs/humanoid_quad.obj"); break;
+    case '6': mesh_idx = 6; LoadMesh("objs/skyscraper.obj"); break;
+    case '7': mesh_idx = 7; LoadMesh("objs/al.obj"); break;
+    case '8': mesh_idx = 8; LoadMesh("objs/cessna.obj"); break;
+    case '9': mesh_idx = 9; LoadMesh("objs/cow.obj"); break;
   }
 }
 
@@ -1062,6 +1081,9 @@ void onKeyboardUp(unsigned char key, int, int) {
       break;
     case 'b': case 'B':
       keys_down[B] = false;
+      break;
+    case 'v': case 'V':
+      keys_down[V] = false;
       break;
   }
 }
@@ -1107,9 +1129,9 @@ void onMouse(int button, int state, int x, int y) {
       glMatrixMode(GL_MODELVIEW);
       glPushMatrix();
         glLoadIdentity();
-        gluPerspective(60, double(screen_w)/double(screen_h), 0.2, 200);
+        gluPerspective(60, double(screen_w)/double(screen_h), 0.02, 200);
         camera.applyMatrix();
-        glTranslatef(0, 2.0f, 0);
+        glTranslatef(-10.0f, 4.0f, 0);
         glGetFloatv (GL_MODELVIEW_MATRIX, matrix);
       glPopMatrix();
       for (VertexIdx i = 0; i < mesh.vertices().size(); ++i) {
@@ -1125,9 +1147,34 @@ void onMouse(int button, int state, int x, int y) {
 }
 
 void onMouseMotion(int x, int y) {
+  if (x == last_x && y == last_y) {
+    return;
+  }
+
   if (selection_mode_on) {
     selection_rect.x2 = x;
     selection_rect.y2 = y;
+  } else if (keys_down[V] && !selected_vertices.empty()) {
+    static int last_time = glutGet(GLUT_ELAPSED_TIME);
+    int time = glutGet(GLUT_ELAPSED_TIME);
+    if (time - last_time > 50) {
+      Vector up{0, 1, 0}, right = cross(camera.fwd, up).normalize();
+      up = cross(right, camera.fwd).normalize();
+
+      right *= (x-last_x) * 0.02;
+      up *= (last_y-y) * 0.02;
+
+      for (VertexIdx idx : selected_vertices) {
+        mesh.vertices()[idx] += right + up;
+      }
+
+      doo_sabin_mesh = mesh.DooSabin(subdivision_iteration_count);
+      catmull_clark_mesh = mesh.CatmullClark(subdivision_iteration_count);
+      center_division_mesh = mesh.CenterDivision(subdivision_iteration_count);
+    } else {
+      return;
+    }
+    last_time = glutGet(GLUT_ELAPSED_TIME);
   } else {
     camera.updateDir(x-last_x, last_y-y);
   }
