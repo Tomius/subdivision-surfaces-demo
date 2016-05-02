@@ -24,9 +24,6 @@
 #include <assimp/scene.h>
 #include <assimp/postprocess.h>
 
-#define GLM_FORCE_RADIANS
-#include <glm/glm.hpp>
-
 #ifndef M_PI
   #define M_PI 3.14159265359
 #endif
@@ -58,9 +55,9 @@ struct Vector {
   bool isNull() const { return length() < 1e-5; }
 };
 
-struct Rectangle {
+struct SelectionRectangle {
   int x1, x2, y1, y2;
-  Rectangle(int x1, int x2, int y1, int y2) : x1(x1), x2(x2), y1(y1), y2(y2) {}
+  SelectionRectangle(int x1, int x2, int y1, int y2) : x1(x1), x2(x2), y1(y1), y2(y2) {}
 } selection_rect{0, 0, 0, 0};
 bool selection_mode_on = false;
 int screen_w = 600, screen_h = 600;
@@ -186,7 +183,6 @@ void setSun() {
 void setLighting(int i) {
   float p[4] = {0.0f, 0.0f, 0.0f, 1};
   glLightfv(GL_LIGHT0 + i, GL_POSITION, p);
-  glLightf(GL_LIGHT0 + i, GL_CONSTANT, 0.0f);
   glLightf(GL_LIGHT0 + i, GL_QUADRATIC_ATTENUATION, 1.0f);
 
   float c[4] = {0.3f, 0.3f, 0.3f, 1};
@@ -725,8 +721,8 @@ public:
                mesh.edge_centers_.find(second_edge) != mesh.edge_centers_.end());
         VertexIdx first_edge_vertex = mesh.edge_centers_[first_edge];
         VertexIdx second_edge_vertex = mesh.edge_centers_[second_edge];
-        const auto& face = {face_center, first_edge_vertex, end_vertex, second_edge_vertex};
-        mesh.faces_.emplace_back(face);
+        Face face = {face_center, first_edge_vertex, end_vertex, second_edge_vertex};
+        mesh.faces_.push_back(face);
         mesh.normals_.push_back(CalculateNormal(mesh.faces_.back(), mesh.vertices_));
       }
     }
@@ -1070,7 +1066,7 @@ void onKeyboardUp(unsigned char key, int, int) {
   }
 }
 
-bool IsInsideSelection(GLfloat matrix[16], const Rectangle& rect, const Vector& vertex) {
+bool IsInsideSelection(GLfloat matrix[16], const SelectionRectangle& rect, const Vector& vertex) {
 
   double point[4] = {vertex.x, vertex.y, vertex.z, 1};
   double projection[4] = {0, 0, 0, 0};
@@ -1106,7 +1102,7 @@ void onMouse(int button, int state, int x, int y) {
       int max_x = std::max(selection_rect.x1, selection_rect.x2);
       int min_y = std::min(selection_rect.y1, selection_rect.y2);
       int max_y = std::max(selection_rect.y1, selection_rect.y2);
-      Rectangle rect = Rectangle{min_x, max_x, min_y, max_y};
+      SelectionRectangle rect = SelectionRectangle{min_x, max_x, min_y, max_y};
       GLfloat matrix[16];
       glMatrixMode(GL_MODELVIEW);
       glPushMatrix();
