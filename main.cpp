@@ -66,13 +66,15 @@ enum ControllKeys {W, A, S, D, B, V, keys_num};
 bool keys_down[keys_num];
 bool draw_smooth_normal = false;
 bool draw_wireframe = true;
+bool draw_reference = true;
+bool double_center_div_subdiv = false;
 int mesh_idx = 4;
 
 struct Camera {
   Vector fwd, pos;
   const double speed, mouse_speed;
 
-  Camera(double speed = 8, double mouse_speed = 0.002f) : fwd(Vector(9, 0, 4).normalize()), pos(-9, 5, -4), speed(speed), mouse_speed(mouse_speed) { }
+  Camera(double speed = 8, double mouse_speed = 0.002f) : fwd(Vector(0, -5, -30).normalize()), pos(2, 10, 30), speed(speed), mouse_speed(mouse_speed) { }
 
   void updatePos(double dt) {
     Vector up = Vector(0, 1, 0), right = cross(fwd, up).normalize();
@@ -346,6 +348,8 @@ Vector CalculateNormal(const Face& face, const std::vector<Vector>& vertices) {
   }
 }
 
+GLUtesselator* tess = gluNewTess();
+
 class Mesh {
 public:
   Mesh() = default;
@@ -400,42 +404,87 @@ public:
     std::cout << filename << " vertex count: " << vertices_.size() << std::endl;
   }
 
-  void DrawInternal(double offset) const {
+  void DrawInternal(bool wireframe) const {
     for (int face_idx = 0; face_idx < faces_.size(); ++face_idx) {
       const Face& face = faces_[face_idx];
-      glBegin(GL_TRIANGLE_FAN); {
+      bool use_tesselator = !wireframe && face.size() > 4;
+
+      if (use_tesselator) {
+        gluBeginPolygon (tess);
+        gluTessBeginContour(tess);
+      } else {
+        glBegin(wireframe ? GL_LINE_STRIP : GL_TRIANGLE_FAN);
+      }
+
+      std::vector<Vector> face_data;
+      face_data.reserve(face.size() * 2*sizeof(Vector));
+      {
         const auto& flat_normal = normals_[face_idx];
-        glNormal3f(flat_normal.x, flat_normal.y, flat_normal.z);
+        if (!use_tesselator) {
+          glNormal3f(flat_normal.x, flat_normal.y, flat_normal.z);
+        }
+        Vector center(0, 0, 0);
         for (VertexIdx index : face) {
+          center += vertices_[index];
+        }
+        center /= face.size();
+
+        for (int i = 0; i <= face.size(); ++i) {
+          VertexIdx index = face[i % face.size()];
           if (draw_smooth_normal) {
             if (vertex_normals_.empty()) {
               UpdateCache();
             }
             const Vector& smooth_normal = vertex_normals_[index];
             if (smooth_normal.isNull()) {
-              glNormal3f(flat_normal.x, flat_normal.y, flat_normal.z);
+              if (use_tesselator) {
+                face_data.push_back(flat_normal);
+              } else {
+                glNormal3f(flat_normal.x, flat_normal.y, flat_normal.z);
+              }
             } else {
-              glNormal3f(smooth_normal.x, smooth_normal.y, smooth_normal.z);
+              if (use_tesselator) {
+                face_data.push_back(smooth_normal);
+              } else {
+                glNormal3f(smooth_normal.x, smooth_normal.y, smooth_normal.z);
+              }
             }
+          } else if (use_tesselator) {
+            face_data.push_back(flat_normal);
           }
 
-          auto vertex = vertices_[index] + offset * flat_normal;
-          glVertex3f(vertex.x, vertex.y, vertex.z);
+          Vector offset;
+          if (!wireframe && draw_wireframe) {
+            offset = (center - vertices_[index]) / 32.0;
+          }
+          auto vertex = vertices_[index] + offset;
+
+          if (use_tesselator) {
+            GLdouble* data_ptr = (GLdouble *)&face_data.back().x;
+            face_data.push_back(vertex);
+            gluTessVertex(tess, (GLdouble *)&vertex.x, data_ptr);
+          } else {
+            glVertex3f(vertex.x, vertex.y, vertex.z);
+          }
         }
-      } glEnd();
+      }
+      if (wireframe || face.size() <= 4) {
+        glEnd();
+      } else {
+        gluTessEndContour(tess);
+        gluEndPolygon(tess);
+      }
     }
   }
 
-  void Draw() const {
-    DrawInternal(0.0);
+  void Draw(float alpha = 1.0) const {
+    DrawInternal(false);
 
     if (draw_wireframe) {
-      glLineWidth(1.0);
+      glLineWidth(2.0);
       glDisable(GL_LIGHTING);
-      glColor4f(0.5, 0.5, 0.5, 0.3);
-      glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-      DrawInternal(0.0001);
-      glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+      glColor4f(0.8, 0.8, 0.8, alpha * 0.8);
+      DrawInternal(true);
       glEnable(GL_LIGHTING);
     }
   }
@@ -877,7 +926,7 @@ private:
   mutable std::map<FaceIdx, Offset> face_to_start_offset_;
 };
 
-Mesh mesh("objs/teddy.obj");
+Mesh mesh("objs/stuff.obj");
 
 int subdivision_iteration_count = 1;
 Mesh doo_sabin_mesh(mesh.DooSabin(subdivision_iteration_count));
@@ -897,35 +946,65 @@ void onDisplay() {
   camera.applyMatrix();
   setSun();
 
+  glPushMatrix();
+  glScalef(1.5f, 1.5f, 1.5f);
   drawPantheon();
+  glPopMatrix();
 
   glPushMatrix(); {
     glEnable(GL_CULL_FACE);
-    glTranslatef(-10.0f, 4.0f, 0);
+    glTranslatef(-18.0f, 4.0f, 0);
     glColor3f(1, 0, 0);
     mesh.Draw();
 
     glDisable(GL_LIGHTING);
-    glColor3f(1.0, 1.0, 1.0);
+    glColor3f(1.0, 1.0, 0.0);
     glBegin(GL_POINTS);
     for (VertexIdx i = 0; i < selected_vertices.size(); ++i) {
-      Vector vertex = 1.0001 * mesh.vertices()[selected_vertices[i]];
+      Vector vertex = 1.001 * mesh.vertices()[selected_vertices[i]];
       glVertex3f(vertex.x, vertex.y, vertex.z);
     }
     glEnd();
     glEnable(GL_LIGHTING);
 
-    glTranslatef(8.0f, 0.0f, 0);
+    glTranslatef(12.0f, 0.0f, 0);
     glColor3f(0.2, 0.4, 0.8);
     doo_sabin_mesh.Draw();
 
-    glTranslatef(8.0f, 0.0f, 0);
+    if (draw_reference) {
+      glPushMatrix();
+      glTranslatef(0.001, 0.001, 0.001);
+      glScalef(1.01, 1.01, 1.01);
+      glColor4f(1, 0, 0, 0.2);
+      mesh.Draw(0.2);
+      glPopMatrix();
+    }
+
+    glTranslatef(12.0f, 0.0f, 0);
     glColor3f(0.6, 0.6, 0.0);
     catmull_clark_mesh.Draw();
 
-    glTranslatef(8.0f, 0.0f, 0);
+    if (draw_reference) {
+      glPushMatrix();
+      glTranslatef(0.001, 0.001, 0.001);
+      glScalef(1.01, 1.01, 1.01);
+      glColor4f(1, 0, 0, 0.2);
+      mesh.Draw(0.2);
+      glPopMatrix();
+    }
+
+    glTranslatef(12.0f, 0.0f, 0);
     glColor3f(0.2, 0.8, 0.2);
     center_division_mesh.Draw();
+
+    if (draw_reference) {
+      glPushMatrix();
+      glTranslatef(0.001, 0.001, 0.001);
+      glScalef(1.01, 1.01, 1.01);
+      glColor4f(1, 0, 0, 0.2);
+      mesh.Draw(0.2);
+      glPopMatrix();
+    }
 
     glDisable(GL_CULL_FACE);
   } glPopMatrix();
@@ -969,6 +1048,13 @@ void onIdle() {
   glutPostRedisplay();
 }
 
+
+void customVertexData(Vector *normal_data) {
+  glNormal3d(normal_data->x, normal_data->y, normal_data->z);
+  Vector* vertex_data = normal_data + 1;
+  glVertex3d(vertex_data->x, vertex_data->y, vertex_data->z);
+}
+
 void onInitialization() {
   glClearColor(135./255., 206./255., 235./255., 1);
   glEnable(GL_DEPTH_TEST);
@@ -977,7 +1063,7 @@ void onInitialization() {
   gluPerspective(60, 1, 0.2, 200);
   glMatrixMode(GL_MODELVIEW);
 
-  glPointSize(3.0);
+  glPointSize(5.0);
   glFrontFace(GL_CCW);
   glCullFace(GL_BACK);
 
@@ -987,6 +1073,10 @@ void onInitialization() {
 
   glEnable (GL_BLEND);
   glBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+  gluTessCallback(tess, GLU_TESS_BEGIN,  ( void (*) ( void ))glBegin     );
+  gluTessCallback(tess, GLU_TESS_VERTEX, ( void (*) ( void ))customVertexData );
+  gluTessCallback(tess, GLU_TESS_END,    ( void (*) ( void ))glEnd       );
 }
 
 void onReshape(int w, int h) {
@@ -1000,10 +1090,9 @@ void onReshape(int w, int h) {
 }
 
 void UpdateSubdivisionSurfaces() {
-  selected_vertices.clear();
   doo_sabin_mesh = mesh.DooSabin(subdivision_iteration_count);
   catmull_clark_mesh = mesh.CatmullClark(subdivision_iteration_count);
-  center_division_mesh = mesh.CenterDivision(subdivision_iteration_count);
+  center_division_mesh = mesh.CenterDivision((double_center_div_subdiv ? 2 : 1) * subdivision_iteration_count);
 }
 
 void LoadMesh(const char* file) {
@@ -1037,13 +1126,26 @@ void onKeyboard(unsigned char key, int, int) {
     case 'm': case 'M':
       draw_wireframe = !draw_wireframe;
       break;
+    case 'k': case 'K':
+      draw_reference = !draw_reference;
+      break;
+    case 'l': case 'L':
+      double_center_div_subdiv = !double_center_div_subdiv;
+      if (double_center_div_subdiv) {
+        center_division_mesh = mesh.CenterDivision(2 * subdivision_iteration_count);
+      } else {
+        center_division_mesh = mesh.CenterDivision(subdivision_iteration_count);
+      }
+      break;
     case '+':
       if (subdivision_iteration_count < 8) {
         subdivision_iteration_count++;
-        selected_vertices.clear();
         doo_sabin_mesh = doo_sabin_mesh.DooSabin();
         catmull_clark_mesh = catmull_clark_mesh.CatmullClark();
         center_division_mesh = center_division_mesh.CenterDivision();
+        if (double_center_div_subdiv) {
+          center_division_mesh = center_division_mesh.CenterDivision();
+        }
       }
       break;
     case '-':
@@ -1052,11 +1154,11 @@ void onKeyboard(unsigned char key, int, int) {
         UpdateSubdivisionSurfaces();
       }
       break;
-    case '0': mesh_idx = 0; LoadMesh("objs/stuff.obj"); break;
+    case '0': mesh_idx = 0; LoadMesh("objs/stuff2.obj"); break;
     case '1': mesh_idx = 1; LoadMesh("objs/cube.obj"); break;
     case '2': mesh_idx = 2; LoadMesh("objs/cube2.obj"); break;
-    case '3': mesh_idx = 3; LoadMesh("objs/teapot.obj"); break;
-    case '4': mesh_idx = 4; LoadMesh("objs/teddy.obj"); break;
+    case '3': mesh_idx = 3; LoadMesh("objs/u_shape.obj"); break;
+    case '4': mesh_idx = 4; LoadMesh("objs/teapot.obj"); break;
     case '5': mesh_idx = 5; LoadMesh("objs/humanoid_quad.obj"); break;
     case '6': mesh_idx = 6; LoadMesh("objs/skyscraper.obj"); break;
     case '7': mesh_idx = 7; LoadMesh("objs/al.obj"); break;
@@ -1131,7 +1233,7 @@ void onMouse(int button, int state, int x, int y) {
         glLoadIdentity();
         gluPerspective(60, double(screen_w)/double(screen_h), 0.02, 200);
         camera.applyMatrix();
-        glTranslatef(-10.0f, 4.0f, 0);
+        glTranslatef(-18.0f, 4.0f, 0);
         glGetFloatv (GL_MODELVIEW_MATRIX, matrix);
       glPopMatrix();
       for (VertexIdx i = 0; i < mesh.vertices().size(); ++i) {
