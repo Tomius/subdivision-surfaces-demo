@@ -172,10 +172,10 @@ void setSun() {
   }
 
   {
-    float p[4] = {1, 0.8, 0.6, 0};
+    float p[4] = {0.6, 0.8, 1, 0};
     glLightfv(GL_LIGHT6, GL_POSITION, p);
 
-    float c[4] = {0.2, 0.2, 0.2, 1};
+    float c[4] = {0.4, 0.4, 0.4, 1};
     glLightfv(GL_LIGHT6, GL_DIFFUSE, c);
     glLightfv(GL_LIGHT6, GL_AMBIENT, black);
 
@@ -341,14 +341,21 @@ Vector CalculateNormal(const Face& face, const std::vector<Vector>& vertices) {
       Vector a = vertices[face[i]] - center;
       Vector b = vertices[face[(i+1)%face.size()]] - center;
       if (!a.isNull() && !b.isNull()) {
-        normal += cross(a.normalize(), b.normalize());
+        Vector current_normal = cross(a, b);
+        if (dot(current_normal, current_normal) > dot(normal, normal)) {
+          normal = current_normal;
+        }
       }
     }
-    return normal.normalize();
+    if (normal.isNull()) {
+      return Vector();
+    } else {
+      return normal.normalize();
+    }
   }
 }
 
-GLUtesselator* tess = gluNewTess();
+GLUtesselator* tess;
 
 class Mesh {
 public:
@@ -407,17 +414,17 @@ public:
   void DrawInternal(bool wireframe) const {
     for (int face_idx = 0; face_idx < faces_.size(); ++face_idx) {
       const Face& face = faces_[face_idx];
-      bool use_tesselator = !wireframe && face.size() > 4;
+      bool use_tesselator = !wireframe && face.size() > 3;
 
       if (use_tesselator) {
-        gluBeginPolygon (tess);
+        gluTessBeginPolygon(tess, nullptr);
         gluTessBeginContour(tess);
       } else {
         glBegin(wireframe ? GL_LINE_STRIP : GL_TRIANGLE_FAN);
       }
 
       std::vector<Vector> face_data;
-      face_data.reserve(face.size() * 2*sizeof(Vector));
+      face_data.reserve((face.size()+1) * 2);
       {
         const auto& flat_normal = normals_[face_idx];
         if (!use_tesselator) {
@@ -462,17 +469,19 @@ public:
           if (use_tesselator) {
             GLdouble* data_ptr = (GLdouble *)&face_data.back().x;
             face_data.push_back(vertex);
-            gluTessVertex(tess, (GLdouble *)&vertex.x, data_ptr);
+            gluTessVertex(tess, (GLdouble *)&face_data.back().x, data_ptr);
           } else {
             glVertex3f(vertex.x, vertex.y, vertex.z);
           }
         }
       }
-      if (wireframe || face.size() <= 4) {
-        glEnd();
-      } else {
+
+      if (use_tesselator) {
+        assert(face_data.size() == (face.size()+1) * 2);
         gluTessEndContour(tess);
-        gluEndPolygon(tess);
+        gluTessEndPolygon(tess);
+      } else {
+        glEnd();
       }
     }
   }
@@ -1049,7 +1058,7 @@ void onIdle() {
 }
 
 
-void customVertexData(Vector *normal_data) {
+GLAPI void APIENTRY customVertexData(Vector *normal_data) {
   glNormal3d(normal_data->x, normal_data->y, normal_data->z);
   Vector* vertex_data = normal_data + 1;
   glVertex3d(vertex_data->x, vertex_data->y, vertex_data->z);
@@ -1074,9 +1083,10 @@ void onInitialization() {
   glEnable (GL_BLEND);
   glBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-  gluTessCallback(tess, GLU_TESS_BEGIN,  ( void (*) ( void ))glBegin     );
-  gluTessCallback(tess, GLU_TESS_VERTEX, ( void (*) ( void ))customVertexData );
-  gluTessCallback(tess, GLU_TESS_END,    ( void (*) ( void ))glEnd       );
+  tess = gluNewTess();
+  gluTessCallback(tess, GLU_TESS_BEGIN, (_GLUfuncptr)glBegin);
+  gluTessCallback(tess, GLU_TESS_VERTEX, (_GLUfuncptr)customVertexData);
+  gluTessCallback(tess, GLU_TESS_END, (_GLUfuncptr)glEnd);
 }
 
 void onReshape(int w, int h) {
@@ -1097,6 +1107,7 @@ void UpdateSubdivisionSurfaces() {
 
 void LoadMesh(const char* file) {
   mesh = Mesh(file);
+  selected_vertices.clear();
   UpdateSubdivisionSurfaces();
 }
 
